@@ -1,4 +1,4 @@
-package bimages
+package butils
 
 import (
 	"bytes"
@@ -6,16 +6,16 @@ import (
 	"image/color"
 	"image/draw"
 	"image/jpeg"
+	"image/png"
 	"io"
-	"log"
 	"math"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sync"
 
 	"github.com/golang/freetype/truetype"
 	"golang.org/x/image/font"
+	"golang.org/x/image/font/gofont/goregular"
 	"golang.org/x/image/math/fixed"
 )
 
@@ -54,18 +54,7 @@ func drawRectangle(img draw.Image, color color.Color, x1, y1, x2, y2, thickness 
 
 	// draw label
 	if label != "" {
-		// Read the font data.
-		fontBytes, err := os.ReadFile(filepath.Join("font", "Arial.ttf"))
-		if err != nil {
-			log.Println(err)
-			return
-		}
-		f, err := truetype.Parse(fontBytes)
-		if err != nil {
-			log.Println(err)
-			return
-		}
-
+		f, _ := truetype.Parse(goregular.TTF)
 		d := &font.Drawer{
 			Dst: img,
 			Src: image.NewUniform(color),
@@ -98,44 +87,44 @@ func addRectangleToFace(img draw.Image, rect image.Rectangle, label string) draw
 	return img
 }
 
-func getImageFromFilePath(filePath string) (draw.Image, error) {
+func getImageFromFilePath(filePath string) (draw.Image, string, error) {
 
 	// read file
 	f, err := os.Open(filePath)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer f.Close()
 
 	// convert as image.Image
-	orig, _, err := image.Decode(f)
+	orig, typeImage, err := image.Decode(f)
+	if err != nil {
+		return nil, "", err
+	}
 
 	// สร้าง instance image สำหรับแก้ไขไฟล์ภาพ
 	b := orig.Bounds()                                     // ดึงขนาด orig img
 	img := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy())) // กำหนด instance ขนาดเท่ากับ orig img
 	draw.Draw(img, img.Bounds(), orig, b.Min, draw.Src)    // copy orig image ใส่ใน instance ขนาดตามที่กำหนด
 
-	return img, err
+	return img, typeImage, err
 }
 
-func getImageFromUrl(url string) (draw.Image, error) {
+func getImageFromUrl(url string) (draw.Image, string, error) {
 	// Read image from url
 	res, err := http.Get(url)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer res.Body.Close()
 
 	// Convert file to byte
-	data, err := io.ReadAll(res.Body)
-	if err != nil {
-		return nil, err
-	}
+	data, _ := io.ReadAll(res.Body)
 
 	// convert as image.Image
-	orig, _, err := image.Decode(bytes.NewReader(data))
+	orig, typeImage, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
-		panic(err.Error())
+		return nil, "", err
 	}
 
 	// สร้าง instance image สำหรับแก้ไขไฟล์ภาพ
@@ -143,12 +132,12 @@ func getImageFromUrl(url string) (draw.Image, error) {
 	img := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy())) // กำหนด instance ขนาดเท่ากับ orig img
 	draw.Draw(img, img.Bounds(), orig, b.Min, draw.Src)    // copy orig image ใส่ใน instance ขนาดตามที่กำหนด
 
-	return img, err
+	return img, typeImage, err
 }
 
 func PlotImageFromUrl(url string, plotData []PlotDataModel) (result []byte, err error) {
 	// read file and convert it
-	src, err := getImageFromUrl(url)
+	src, t, err := getImageFromUrl(url)
 	if err != nil {
 		return nil, err
 	}
@@ -163,9 +152,11 @@ func PlotImageFromUrl(url string, plotData []PlotDataModel) (result []byte, err 
 	}
 
 	buf := new(bytes.Buffer)
-	err = jpeg.Encode(buf, dst, nil)
-	if err != nil {
-		return nil, err
+	switch t {
+	case "jpeg":
+		jpeg.Encode(buf, dst, nil)
+	case "png":
+		png.Encode(buf, dst)
 	}
 
 	return buf.Bytes(), nil
@@ -173,9 +164,9 @@ func PlotImageFromUrl(url string, plotData []PlotDataModel) (result []byte, err 
 
 func PlotImageFromBytes(data []byte, plotData []PlotDataModel) (result []byte, err error) {
 	// convert as image.Image
-	orig, _, err := image.Decode(bytes.NewReader(data))
+	orig, t, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
-		panic(err.Error())
+		return nil, err
 	}
 
 	// สร้าง instance image สำหรับแก้ไขไฟล์ภาพ
@@ -193,9 +184,38 @@ func PlotImageFromBytes(data []byte, plotData []PlotDataModel) (result []byte, e
 	}
 
 	buf := new(bytes.Buffer)
-	err = jpeg.Encode(buf, dst, nil)
+	switch t {
+	case "jpeg":
+		jpeg.Encode(buf, dst, nil)
+	case "png":
+		png.Encode(buf, dst)
+	}
+
+	return buf.Bytes(), nil
+}
+
+func PlotImageFromDir(filePath string, plotData []PlotDataModel) (result []byte, err error) {
+	// convert as image.Image
+	src, t, err := getImageFromFilePath(filePath)
 	if err != nil {
 		return nil, err
+	}
+
+	var dst draw.Image
+	for idx, p := range plotData {
+		if idx == 0 {
+			dst = addRectangleToFace(src, p.Rect, p.Label)
+			continue
+		}
+		dst = addRectangleToFace(dst, p.Rect, p.Label)
+	}
+
+	buf := new(bytes.Buffer)
+	switch t {
+	case "jpeg":
+		jpeg.Encode(buf, dst, nil)
+	case "png":
+		png.Encode(buf, dst)
 	}
 
 	return buf.Bytes(), nil
