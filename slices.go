@@ -1,6 +1,34 @@
-package bslices
+package butils
 
 import "fmt"
+
+// สำหรับเช็คค่า slice ว่ามี string ของเราอยู่ในนั้นหรือไม่
+func Contains[V string | []string](s []string, val V) bool {
+	if val, ok := any(val).(string); ok {
+		for _, v := range s {
+			if v == val {
+				return true
+			}
+		}
+	}
+
+	if val, ok := any(val).([]string); ok {
+		check := []string{}
+		for _, str := range val {
+			for _, v := range s {
+				if v == str {
+					check = append(check, str)
+					continue
+				}
+			}
+		}
+		if len(check) == len(val) {
+			return true
+		}
+	}
+
+	return false
+}
 
 // สำหรับ Filter slice โดย filter จากค่า return ของ function ที่เป็นจริง ส่ง type ไหนมา จะส่ง type นั้นกลับไป
 func Filter[T any](v []T, f func(T) bool) []T {
@@ -51,8 +79,10 @@ func Find[T any](v []T, f func(T) bool) (found T, idx int, err error) {
 	return found, -1, fmt.Errorf("not found")
 }
 
+// สำหรับลบค่าที่ซ้ำกันใน slice ออก
 func SetUnique[T comparable](v []T) (result []T) {
 	seen := make(map[T]struct{})
+	result = make([]T, 0)
 	for _, s := range v {
 		if _, ok := seen[s]; !ok {
 			result = append(result, s)
